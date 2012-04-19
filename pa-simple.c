@@ -1,3 +1,4 @@
+#include <pulse/sample.h>
 #include <pulse/simple.h>
 #include <assert.h>
 #include <sys/mman.h>
@@ -54,6 +55,8 @@ int play(int fd, size_t offset, size_t data_size, unsigned rate,
 	if (!data)
 		return ENOMEM;
 
+	char nice[100];
+	printf("Playing: %s.\n", pa_sample_spec_snprint(nice, 100, &ss));
 	error = 0;
 	if (!pa_simple_write(s, data, data_size, &error))
 		pa_simple_drain(s, &error);
