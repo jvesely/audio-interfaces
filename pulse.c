@@ -20,9 +20,10 @@ typedef struct buffer {
 	void *data;
 	void *end;
 	void *pos;
+	pa_threaded_mainloop *loop;
 } buffer_t;
 
-void get_data(pa_stream *stream, size_t size, void *arg)
+static void get_data(pa_stream *stream, size_t size, void *arg)
 {
 	printf("Reading data.\n");
 	buffer_t *buffer = arg;
@@ -30,21 +31,45 @@ void get_data(pa_stream *stream, size_t size, void *arg)
 		size = buffer->end - buffer->pos;
 	pa_stream_write(stream, buffer->pos, size, NULL, 0, 0);
 	buffer->pos += size;
+	if (buffer->pos == buffer->end)
+		pa_threaded_mainloop_signal(buffer->loop, 0);
 }
 
-void state_change(pa_context *context, void* arg)
+static void state_change(pa_context *context, void* arg)
 {
 	pa_context_state_t state = pa_context_get_state(context);
-	printf("Context state: %d.\n", state);
-	if (state == PA_CONTEXT_READY || state == PA_CONTEXT_FAILED)
-		*(volatile bool*)arg = true;
+	printf("Context state(callback): %d.\n", state);
+	pa_threaded_mainloop_signal(arg, 0);
+}
+
+static void stream_state_change(pa_stream *stream, void* arg)
+{
+	pa_context_state_t state = pa_stream_get_state(stream);
+	printf("Stream state(callback): %d.\n", state);
+	pa_threaded_mainloop_signal(arg, 0);
+}
+
+static void stream_drain(pa_stream *stream, int s, void* arg)
+{
+	pa_stream_disconnect(stream);
+	printf("Disconnected stream.\n");
+	pa_stream_unref(stream);
+	pa_threaded_mainloop_signal(arg, 0);
+}
+
+static void context_drain(pa_context *context, void* arg)
+{
+	pa_context_disconnect(context);
+	printf("Disconnected context.\n");
+	pa_context_unref(context);
+	pa_threaded_mainloop_signal(arg, 0);
 }
 
 int play(int fd, size_t offset, size_t data_size, unsigned rate,
     unsigned sample_size, unsigned channels, bool sign)
 {
 
-	/* Only 8bit samles are supported in unsigned mode */
+	/* Only 8bit samples are supported in unsigned mode */
 	if (!sign && sample_size != 8)
 		return ENOTSUP;
 
@@ -88,14 +113,22 @@ int play(int fd, size_t offset, size_t data_size, unsigned rate,
 	}
 	printf("Created context.\n");
 
-	volatile bool context_connected = false;
+	pa_context_set_state_callback(context, state_change, loop);
 
-	pa_context_set_state_callback(context, state_change, (void*)&context_connected);
-
-	pa_context_connect(context, NULL, PA_CONTEXT_NOFLAGS, NULL);
-	while (!context_connected) usleep(100);
-	printf("Connected context.\n");
-
+	{
+		pa_threaded_mainloop_lock(loop);
+		pa_context_connect(context, NULL, PA_CONTEXT_NOAUTOSPAWN | PA_CONTEXT_NOFAIL, NULL);
+		pa_context_state_t state = pa_context_get_state(context);
+		pa_threaded_mainloop_unlock(loop);
+		while (state != PA_CONTEXT_READY && state != PA_CONTEXT_FAILED) {
+			pa_threaded_mainloop_lock(loop);
+			pa_threaded_mainloop_wait(loop);
+			state = pa_context_get_state(context);
+			pa_threaded_mainloop_unlock(loop);
+			printf("Context state: %d.\n", state);
+		}
+		printf("Connected context.\n");
+	}
 
 	/* Create stream */
 	pa_stream *stream = pa_stream_new(context, "STREAM", &ss, NULL);
@@ -120,46 +153,45 @@ int play(int fd, size_t offset, size_t data_size, unsigned rate,
 		.data = data,
 		.end = data + data_size,
 		.pos = data,
+		.loop =  loop,
 	};
 
-	pa_stream_set_write_callback(stream, get_data, &buffer);
-	printf("Set write callback.\n");
+	{
+		pa_threaded_mainloop_lock(loop);
+		pa_stream_set_write_callback(stream, get_data, &buffer);
+		pa_stream_set_state_callback(stream, stream_state_change, loop);
+		printf("Set write and state callbacks.\n");
 
-	pa_stream_connect_playback(stream, NULL, NULL, 0, NULL, NULL);
-	// TODO wait for connection active status
-	printf("Connected playback.\n");
-	while (buffer.pos < buffer.end)
-		usleep(10);
+		pa_stream_connect_playback(stream, NULL, NULL, 0, NULL, NULL);
+		pa_stream_state_t state = pa_stream_get_state(stream);
+		pa_threaded_mainloop_unlock(loop);
+		while (state != PA_STREAM_READY && state != PA_STREAM_FAILED) {
+			pa_threaded_mainloop_lock(loop);
+			pa_threaded_mainloop_wait(loop);
+			state = pa_stream_get_state(stream);
+			pa_threaded_mainloop_unlock(loop);
+			printf("Stream state: %d.\n", state);
+		}
+		printf("Connected playback.\n");
+	}
+	while (buffer.pos < buffer.end) {
+		pa_threaded_mainloop_lock(loop);
+		pa_threaded_mainloop_wait(loop);
+		pa_threaded_mainloop_unlock(loop);
+	}
 
 	munmap(data, data_size);
 
-	{
-		pa_operation *drain_op = pa_stream_drain(stream, NULL, NULL);
-		if (drain_op) {
-			printf("Waiting for stream drain.\n");
-			while (pa_operation_get_state(drain_op)
-			    == PA_OPERATION_RUNNING)
-				usleep(100);
-			pa_operation_unref(drain_op);
-		}
-		pa_stream_disconnect(stream);
-		printf("Disconnected stream.\n");
-		pa_stream_unref(stream);
-	}
+	pa_threaded_mainloop_lock(loop);
+	pa_operation *drain_op = pa_stream_drain(stream, stream_drain, loop);
+	pa_operation_unref(drain_op);
 
-	{
-		pa_operation *drain_op = pa_context_drain(context, NULL, NULL);
-		if (drain_op) {
-			printf("Waiting for context drain.\n");
-			while (pa_operation_get_state(drain_op)
-			    == PA_OPERATION_RUNNING)
-				usleep(100);
-			pa_operation_unref(drain_op);
-		}
-		pa_context_disconnect(context);
-		printf("Disconnected context.\n");
-		pa_context_unref(context);
-	}
+	drain_op = pa_context_drain(context, context_drain, loop);
+	while (pa_operation_get_state(drain_op) == PA_OPERATION_RUNNING)
+		pa_threaded_mainloop_wait(loop);
+	pa_operation_unref(drain_op);
+	pa_threaded_mainloop_unlock(loop);
+
 	pa_threaded_mainloop_stop(loop);
 	printf("Stopped main loop.\n");
 	pa_threaded_mainloop_free(loop);
