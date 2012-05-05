@@ -78,9 +78,11 @@ int play(int fd, size_t offset, size_t data_size, unsigned rate,
 
 	while (read(fd, buffer, buffer_size) > 0) {
 		while ((ret = snd_pcm_mmap_writei(handle, buffer, frames)) == EAGAIN);
-		if (ret < 0)
+		if (ret < 0) {
 			printf("error writing to buffer: %s.\n",
 			    snd_strerror(ret));
+			break;
+		}
 	}
 
 	snd_pcm_drain(handle);
