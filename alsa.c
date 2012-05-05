@@ -14,7 +14,7 @@ int play(int fd, size_t offset, size_t data_size, unsigned rate,
 	snd_pcm_hw_params_t *params;
 
 	/* Open default ALSA device */
-	int ret = snd_pcm_open(&handle, "default", SND_PCM_STREAM_PLAYBACK, 0);
+	int ret = snd_pcm_open(&handle, "plughw:0,0", SND_PCM_STREAM_PLAYBACK, 0);
 	if (ret < 0)
 		return ret;
 
@@ -77,7 +77,7 @@ int play(int fd, size_t offset, size_t data_size, unsigned rate,
 	printf("allocated buffer: %p %zu.\n", buffer, buffer_size);
 
 	while (read(fd, buffer, buffer_size) > 0) {
-		ret = snd_pcm_writei(handle, buffer, frames);
+		while ((ret = snd_pcm_writei(handle, buffer, frames)) == EAGAIN);
 		if (ret < 0)
 			printf("error writing to buffer: %s.\n",
 			    snd_strerror(ret));
