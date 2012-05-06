@@ -59,5 +59,6 @@ int play(int fd, size_t offset, size_t data_size, unsigned rate,
 	while ((size = read(fd, buffer, buffer_size)) > 0) {
 		write(dev, buffer, size);
 	}
+	close(dev);
 	return 0;
 }
