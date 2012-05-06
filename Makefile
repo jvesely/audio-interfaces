@@ -1,6 +1,6 @@
 
 SHARED_SOURCES=main.c wav.c
-PROJECTS=pa-simple pulse alsa alsa-map alsa-map2
+PROJECTS=pa-simple pulse alsa alsa-map alsa-map2 oss
 
 all: $(PROJECTS)
 
@@ -18,6 +18,9 @@ alsa-map: $(SHARED_SOURCES) alsa-map.c
 
 alsa-map2: $(SHARED_SOURCES) alsa-map2.c
 	$(CC) -I . -std=c99 $^ -lasound -o $@
+
+oss: $(SHARED_SOURCES) oss.c
+	$(CC) -I . -std=c99 $^ -o $@
 
 clean:
 	rm -vf *.o $(PROJECTS)
