@@ -1,6 +1,6 @@
 
 SHARED_SOURCES=main.c wav.c
-PROJECTS=pa-simple pulse alsa alsa-map alsa-map2 oss
+PROJECTS=pa-simple pulse alsa alsa-map alsa-map2 oss jack
 
 all: $(PROJECTS)
 
@@ -21,6 +21,9 @@ alsa-map2: $(SHARED_SOURCES) alsa-map2.c
 
 oss: $(SHARED_SOURCES) oss.c
 	$(CC) -I . -std=c99 $^ -o $@
+
+jack: $(SHARED_SOURCES) jack.c
+	$(CC) -I . -std=c99 $^ -ljack -o $@
 
 clean:
 	rm -vf *.o $(PROJECTS)
