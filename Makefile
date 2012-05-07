@@ -25,5 +25,8 @@ oss: $(SHARED_SOURCES) oss.c
 jack: $(SHARED_SOURCES) jack.c
 	$(CC) -I . -std=c99 $^ -ljack -o $@
 
+tags:
+	ctags -R
+
 clean:
-	rm -vf *.o $(PROJECTS)
+	rm -vf *.o $(PROJECTS) tags
