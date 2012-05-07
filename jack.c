@@ -46,6 +46,7 @@ int play(int fd, size_t offset, size_t data_size, unsigned rate,
 		        JackPortIsPhysical|JackPortIsInput);
 		jack_connect(client, jack_port_name(pb.port), ports[0]);
 		jack_connect(client, jack_port_name(pb.port), ports[1]);
+		free(ports);
 		while(pb.running)
 			sleep(1);
 	} else {
