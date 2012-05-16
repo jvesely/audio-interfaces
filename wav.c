@@ -61,7 +61,7 @@ int wav_parse_header(void *file, size_t *data_size,
 	if (channels)
 		*channels = (header->channels);
 	if (sign)
-		*sign = (header->sample_size) == 16 ? true : false;
+		*sign = (header->sample_size) == 8 ? false : true;
 	if (error)
 		*error = "no error";
 
